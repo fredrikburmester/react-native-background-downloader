@@ -58,7 +58,13 @@ RCT_EXPORT_MODULE();
     if (aSelector == @selector(completeHandler:resolver:rejecter:)) {
         return YES;
     }
-    return [super respondsToSelector:aSelector];
+    BOOL responds = [super respondsToSelector:aSelector];
+#ifdef DEBUG
+    if (!responds) {
+        DLog(@"[RNBackgroundDownloader] Missing selector: %@", NSStringFromSelector(aSelector));
+    }
+#endif
+    return responds;
 }
 
 - (NSArray<NSString *> *)supportedEvents {
