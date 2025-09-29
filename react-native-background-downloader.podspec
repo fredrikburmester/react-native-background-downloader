@@ -21,10 +21,10 @@ Pod::Spec.new do |s|
   
   # C++ standard library settings for new architecture
   s.pod_target_xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
     'CLANG_CXX_LIBRARY' => 'libc++',
-    'OTHER_CFLAGS' => '$(inherited) -std=gnu++17 -x objective-c++',
-    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=gnu++17 -DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1',
+    'OTHER_CFLAGS' => '$(inherited) -std=gnu++20 -x objective-c++',
+    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=gnu++20 -DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1',
     'HEADER_SEARCH_PATHS' => '$(inherited)'
   }
   
