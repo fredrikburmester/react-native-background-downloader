@@ -105,8 +105,5 @@
     "publish": "npm publish",
     "test": "jest"
   },
-  "types": "src/index.d.ts",
-  "dependencies": {
-    "@kesha-antonov/react-native-background-downloader": "file:/Users/fredrikburmester/Documents/GitHub/react-native-background-downloader"
-  }
+  "types": "src/index.d.ts"
 }
