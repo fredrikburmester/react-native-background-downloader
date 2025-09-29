@@ -337,7 +337,7 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
     DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] jobId: %@", jobId);
     
     // Defensive programming: Check if we have valid parameters
-    if (!jobId || !resolve) {
+    if (!jobId) {
         DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] Invalid parameters");
         if (reject) {
             reject(@"invalid_params", @"Invalid parameters provided to completeHandler", nil);
@@ -358,7 +358,9 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
             }
             
             // Resolve the promise
-            resolve(nil);
+            if (resolve) {
+                resolve(nil);
+            }
         } @catch (NSException *exception) {
             DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] Exception: %@", exception);
             if (reject) {
@@ -704,5 +706,9 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
     return std::make_shared<facebook::react::NativeRNBackgroundDownloaderSpecJSI>(params);
 }
 #endif
+
+- (void)completeHandler:(NSString *)jobId {
+    [self completeHandler:jobId resolver:nil rejecter:nil];
+}
 
 @end
