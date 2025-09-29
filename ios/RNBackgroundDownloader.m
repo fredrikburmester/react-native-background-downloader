@@ -2,7 +2,12 @@
 #import "RNBGDTaskConfig.h"
 #import <MMKV/MMKV.h>
 #ifdef RCT_NEW_ARCH_ENABLED
-#import "<GeneratedSpec>.h"
+#import "RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h"
+#include <memory>
+#include <utility>
+
+@interface RNBackgroundDownloader () <NativeRNBackgroundDownloaderSpec>
+@end
 #endif
 
 #define ID_TO_CONFIG_MAP_KEY @"com.eko.bgdownloadidmap"
@@ -698,6 +703,6 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
  - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
  {
-    return std::make_shared<facebook::react::<MyModuleSpecJSI>>(params);
+    return std::make_shared<facebook::react::NativeRNBackgroundDownloaderSpecJSI>(params);
  }
 #endif
