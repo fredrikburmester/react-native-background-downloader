@@ -1,3 +1,59 @@
+#ifdef RCT_NEW_ARCH_ENABLED
+- (void)setDispatchToJSThread:(__unused facebook::react::RCTDispatchToJSThread)block {
+}
+
+- (void)setSurfacePresenter:(__unused std::shared_ptr<facebook::react::SurfacePresenter> *)surfacePresenter {
+}
+
+- (void)setIsInspectable:(BOOL)isInspectable {
+    #ifdef DEBUG
+    DLog(@"[RNBackgroundDownloader] setIsInspectable:%@", isInspectable ? @"YES" : @"NO");
+    #endif
+}
+
+- (void)setCallInvoker:(std::shared_ptr<facebook::react::CallInvoker>)callInvoker {
+    #ifdef DEBUG
+    DLog(@"[RNBackgroundDownloader] setCallInvoker:%@", callInvoker ? @"set" : @"nil");
+    #endif
+}
+
+- (void)setBundleManager:(id)bundleManager {
+    #ifdef DEBUG
+    DLog(@"[RNBackgroundDownloader] setBundleManager:%@", bundleManager);
+    #endif
+}
+
+- (void)initialize {
+    if (isJavascriptLoaded) {
+        [self registerBridgeListener];
+    } else {
+        __weak typeof(self) weakSelf = self;
+        pendingInitializeBlock = ^{
+            [weakSelf registerBridgeListener];
+        };
+    }
+}
+
+- (void)installJSIBindingsWithRuntime:(facebook::jsi::Runtime *)runtime callInvoker:(std::shared_ptr<facebook::react::CallInvoker>)callInvoker {
+    #ifdef DEBUG
+    DLog(@"[RNBackgroundDownloader] installJSIBindingsWithRuntime:callInvoker:");
+    #endif
+}
+
+- (void)installJSIBindingsWithRuntime:(facebook::jsi::Runtime *)runtime {
+    #ifdef DEBUG
+    DLog(@"[RNBackgroundDownloader] installJSIBindingsWithRuntime:");
+    #endif
+}
+#endif
+#ifdef RCT_NEW_ARCH_ENABLED
+#include <jsi/jsi.h>
+#include <memory>
+#import <React/RCTSurfacePresenterStub.h>
+#import <React/RCTTurboModuleWithholder.h>
+#import <ReactCommon/CallInvoker.h>
+using namespace facebook::jsi;
+#endif
 #import "RNBackgroundDownloader.h"
 #import "RNBGDTaskConfig.h"
 #import <MMKV/MMKV.h>
@@ -23,6 +79,10 @@
 
 static CompletionHandler storedCompletionHandler;
 
+typedef void (^RNBGDVoidBlock)(void);
+typedef void (^RNBGDJSIBindingsBlock)(facebook::jsi::Runtime *runtime);
+typedef void (^RNBGDJSIBindingsInvokerBlock)(facebook::jsi::Runtime *runtime, std::shared_ptr<facebook::react::CallInvoker> callInvoker);
+
 @implementation RNBackgroundDownloader {
     MMKV *mmkv;
     NSURLSession *urlSession;
@@ -39,6 +99,9 @@ static CompletionHandler storedCompletionHandler;
     NSDate *lastProgressReportedAt;
     BOOL isBridgeListenerInited;
     BOOL isJavascriptLoaded;
+    RNBGDVoidBlock pendingInitializeBlock;
+    RNBGDVoidBlock pendingInstallJSIBindingsWithRuntimeBlock;
+    RNBGDJSIBindingsInvokerBlock pendingInstallJSIBindingsWithRuntimeCallInvokerBlock;
 }
 
 RCT_EXPORT_MODULE();
@@ -376,7 +439,7 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
     });
 }
 
-RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
     DLog(@"[RNBackgroundDownloader] - [checkForExistingDownloads]");
     [self lazyRegisterSession];
     [urlSession getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> * _Nonnull dataTasks, NSArray<NSURLSessionUploadTask *> * _Nonnull uploadTasks, NSArray<NSURLSessionDownloadTask *> * _Nonnull downloadTasks) {

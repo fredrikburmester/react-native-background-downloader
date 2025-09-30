@@ -1,7 +1,7 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
-typedef void (^CompletionHandler)();
+typedef void (^CompletionHandler)(void);
 
 @interface RNBackgroundDownloader : RCTEventEmitter <RCTBridgeModule, NSURLSessionDelegate, NSURLSessionDownloadDelegate>
 
