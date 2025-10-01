@@ -2,14 +2,6 @@
 #import "RNBGDTaskConfig.h"
 #import <MMKV/MMKV.h>
 #include <utility>
-// New Architecture support temporarily disabled
-// #ifdef RCT_NEW_ARCH_ENABLED
-// #if __has_include("RNBackgroundDownloaderSpec.h")
-// #import "RNBackgroundDownloaderSpec.h"
-// #elif __has_include(<RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>)
-// #import <RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>
-// #endif
-// #endif
 
 #define ID_TO_CONFIG_MAP_KEY @"com.eko.bgdownloadidmap"
 #define PROGRESS_INTERVAL_KEY @"progressInterval"
@@ -700,12 +692,3 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
 }
 
 @end
-
-// New Architecture TurboModule method temporarily disabled
-// #ifdef RCT_NEW_ARCH_ENABLED
-// - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
-//     (const facebook::react::ObjCTurboModule::InitParams &)params
-// {
-//     return std::make_shared<facebook::react::NativeRNBackgroundDownloaderSpecJSI>(params);
-// }
-// #endif

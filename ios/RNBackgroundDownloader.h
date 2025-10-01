@@ -1,15 +1,6 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
-// New Architecture support temporarily disabled
-// #ifdef RCT_NEW_ARCH_ENABLED
-// #if __has_include("RNBackgroundDownloaderSpec.h")
-// #import "RNBackgroundDownloaderSpec.h"
-// #elif __has_include(<RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>)
-// #import <RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>
-// #endif
-// #endif
-
-typedef void (^CompletionHandler)();
+typedef void (^CompletionHandler)(void);
 
 @interface RNBackgroundDownloader : RCTEventEmitter <RCTBridgeModule, NSURLSessionDelegate, NSURLSessionDownloadDelegate>
 
@@ -18,9 +9,3 @@ typedef void (^CompletionHandler)();
 
 @end
 
-// New Architecture interface temporarily disabled
-// #ifdef RCT_NEW_ARCH_ENABLED
-// @interface RNBackgroundDownloader () <NativeRNBackgroundDownloaderSpec>
-// 
-// @end
-// #endif
