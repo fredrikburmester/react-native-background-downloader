@@ -1,70 +1,15 @@
-#ifdef RCT_NEW_ARCH_ENABLED
-- (void)setDispatchToJSThread:(__unused facebook::react::RCTDispatchToJSThread)block {
-}
-
-- (void)setSurfacePresenter:(__unused std::shared_ptr<facebook::react::SurfacePresenter> *)surfacePresenter {
-}
-
-- (void)setIsInspectable:(BOOL)isInspectable {
-    #ifdef DEBUG
-    DLog(@"[RNBackgroundDownloader] setIsInspectable:%@", isInspectable ? @"YES" : @"NO");
-    #endif
-}
-
-- (void)setCallInvoker:(std::shared_ptr<facebook::react::CallInvoker>)callInvoker {
-    #ifdef DEBUG
-    DLog(@"[RNBackgroundDownloader] setCallInvoker:%@", callInvoker ? @"set" : @"nil");
-    #endif
-}
-
-- (void)setBundleManager:(id)bundleManager {
-    #ifdef DEBUG
-    DLog(@"[RNBackgroundDownloader] setBundleManager:%@", bundleManager);
-    #endif
-}
-
-- (void)initialize {
-    if (isJavascriptLoaded) {
-        [self registerBridgeListener];
-    } else {
-        __weak typeof(self) weakSelf = self;
-        pendingInitializeBlock = ^{
-            [weakSelf registerBridgeListener];
-        };
-    }
-}
-
-- (void)installJSIBindingsWithRuntime:(facebook::jsi::Runtime *)runtime callInvoker:(std::shared_ptr<facebook::react::CallInvoker>)callInvoker {
-    #ifdef DEBUG
-    DLog(@"[RNBackgroundDownloader] installJSIBindingsWithRuntime:callInvoker:");
-    #endif
-}
-
-- (void)installJSIBindingsWithRuntime:(facebook::jsi::Runtime *)runtime {
-    #ifdef DEBUG
-    DLog(@"[RNBackgroundDownloader] installJSIBindingsWithRuntime:");
-    #endif
-}
-#endif
-#ifdef RCT_NEW_ARCH_ENABLED
-#include <jsi/jsi.h>
-#include <memory>
-#import <React/RCTSurfacePresenterStub.h>
-#import <React/RCTTurboModuleWithholder.h>
-#import <ReactCommon/CallInvoker.h>
-using namespace facebook::jsi;
-#endif
 #import "RNBackgroundDownloader.h"
 #import "RNBGDTaskConfig.h"
 #import <MMKV/MMKV.h>
-#ifdef RCT_NEW_ARCH_ENABLED
-#import "RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h"
-#include <memory>
 #include <utility>
-
-@interface RNBackgroundDownloader () <NativeRNBackgroundDownloaderSpec>
-@end
-#endif
+// New Architecture support temporarily disabled
+// #ifdef RCT_NEW_ARCH_ENABLED
+// #if __has_include("RNBackgroundDownloaderSpec.h")
+// #import "RNBackgroundDownloaderSpec.h"
+// #elif __has_include(<RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>)
+// #import <RNBackgroundDownloaderSpec/RNBackgroundDownloaderSpec.h>
+// #endif
+// #endif
 
 #define ID_TO_CONFIG_MAP_KEY @"com.eko.bgdownloadidmap"
 #define PROGRESS_INTERVAL_KEY @"progressInterval"
@@ -78,10 +23,6 @@ using namespace facebook::jsi;
 #endif
 
 static CompletionHandler storedCompletionHandler;
-
-typedef void (^RNBGDVoidBlock)(void);
-typedef void (^RNBGDJSIBindingsBlock)(facebook::jsi::Runtime *runtime);
-typedef void (^RNBGDJSIBindingsInvokerBlock)(facebook::jsi::Runtime *runtime, std::shared_ptr<facebook::react::CallInvoker> callInvoker);
 
 @implementation RNBackgroundDownloader {
     MMKV *mmkv;
@@ -99,9 +40,6 @@ typedef void (^RNBGDJSIBindingsInvokerBlock)(facebook::jsi::Runtime *runtime, st
     NSDate *lastProgressReportedAt;
     BOOL isBridgeListenerInited;
     BOOL isJavascriptLoaded;
-    RNBGDVoidBlock pendingInitializeBlock;
-    RNBGDVoidBlock pendingInstallJSIBindingsWithRuntimeBlock;
-    RNBGDJSIBindingsInvokerBlock pendingInstallJSIBindingsWithRuntimeCallInvokerBlock;
 }
 
 RCT_EXPORT_MODULE();
@@ -121,13 +59,7 @@ RCT_EXPORT_MODULE();
     if (aSelector == @selector(completeHandler:resolver:rejecter:)) {
         return YES;
     }
-    BOOL responds = [super respondsToSelector:aSelector];
-#ifdef DEBUG
-    if (!responds) {
-        DLog(@"[RNBackgroundDownloader] Missing selector: %@", NSStringFromSelector(aSelector));
-    }
-#endif
-    return responds;
+    return [super respondsToSelector:aSelector];
 }
 
 - (NSArray<NSString *> *)supportedEvents {
@@ -294,9 +226,9 @@ RCT_EXPORT_MODULE();
         [mmkv setData:[self serialize: taskToConfigMap] forKey:ID_TO_CONFIG_MAP_KEY];
 
         if (taskConfig) {
-            [self -> idToTaskMap removeObjectForKey:taskConfig.id];
-            [idToPercentMap removeObjectForKey:taskConfig.id];
-            [idToLastBytesMap removeObjectForKey:taskConfig.id];
+            [self -> idToTaskMap removeObjectForKey:taskConfig.configId];
+            [idToPercentMap removeObjectForKey:taskConfig.configId];
+            [idToLastBytesMap removeObjectForKey:taskConfig.configId];
         }
     }
 }
@@ -371,6 +303,7 @@ RCT_EXPORT_METHOD(download: (NSDictionary *) options) {
     }
 }
 
+
 RCT_EXPORT_METHOD(pauseTask: (NSString *)identifier) {
     DLog(@"[RNBackgroundDownloader] - [pauseTask]");
     @synchronized (sharedLock) {
@@ -406,7 +339,7 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
     DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] jobId: %@", jobId);
     
     // Defensive programming: Check if we have valid parameters
-    if (!jobId) {
+    if (!jobId || !resolve) {
         DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] Invalid parameters");
         if (reject) {
             reject(@"invalid_params", @"Invalid parameters provided to completeHandler", nil);
@@ -427,9 +360,7 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
             }
             
             // Resolve the promise
-            if (resolve) {
-                resolve(nil);
-            }
+            resolve(nil);
         } @catch (NSException *exception) {
             DLog(@"[RNBackgroundDownloader] - [completeHandlerIOS] Exception: %@", exception);
             if (reject) {
@@ -439,7 +370,7 @@ RCT_EXPORT_METHOD(completeHandler:(nonnull NSString *)jobId resolver:(RCTPromise
     });
 }
 
-RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     DLog(@"[RNBackgroundDownloader] - [checkForExistingDownloads]");
     [self lazyRegisterSession];
     [urlSession getTasksWithCompletionHandler:^(NSArray<NSURLSessionDataTask *> * _Nonnull dataTasks, NSArray<NSURLSessionUploadTask *> * _Nonnull uploadTasks, NSArray<NSURLSessionDownloadTask *> * _Nonnull downloadTasks) {
@@ -463,7 +394,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                 RNBGDTaskConfig *taskConfig = nil;
                 for (NSNumber *key in self->taskToConfigMap) {
                     RNBGDTaskConfig *config = self->taskToConfigMap[key];
-                    if ([config.id isEqualToString:configId]) {
+                    if ([config.configId isEqualToString:configId]) {
                         taskIdentifier = key;
                         taskConfig = config;
                         break;
@@ -489,8 +420,8 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                         ? [NSNumber numberWithFloat:(float)task.countOfBytesReceived/(float)task.countOfBytesExpectedToReceive]
                         : @0.0;
 
-                    [foundTasks addObject:@{
-                        @"id": taskConfig.id,
+            [foundTasks addObject:@{
+                @"id": taskConfig.configId,
                         @"metadata": taskConfig.metadata,
                         @"state": [NSNumber numberWithInt:(int)task.state],
                         @"bytesDownloaded": [NSNumber numberWithLongLong:task.countOfBytesReceived],
@@ -498,8 +429,8 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                     }];
                     taskConfig.reportedBegin = YES;
                     self->taskToConfigMap[@(task.taskIdentifier)] = taskConfig;
-                    self->idToTaskMap[taskConfig.id] = task;
-                    self->idToPercentMap[taskConfig.id] = percent;
+                    self->idToTaskMap[taskConfig.configId] = task;
+                    self->idToPercentMap[taskConfig.configId] = percent;
                 } else {
                     [task cancel];
                 }
@@ -526,7 +457,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                 if (error == nil) {
                     NSDictionary *responseHeaders = ((NSHTTPURLResponse *)downloadTask.response).allHeaderFields;
                     [self sendEventWithName:@"downloadComplete" body:@{
-                        @"id": taskConfig.id,
+                        @"id": taskConfig.configId,
                         @"headers": responseHeaders,
                         @"location": taskConfig.destination,
                         @"bytesDownloaded": [NSNumber numberWithLongLong:downloadTask.countOfBytesReceived],
@@ -534,7 +465,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                     }];
                 } else {
                     [self sendEventWithName:@"downloadFailed" body:@{
-                        @"id": taskConfig.id,
+                        @"id": taskConfig.configId,
                         @"error": [error localizedDescription],
                         // TODO
                         @"errorCode": @-1
@@ -565,7 +496,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                 NSDictionary *responseHeaders = ((NSHTTPURLResponse *)downloadTask.response).allHeaderFields;
                 if (self != nil) {
                     [self sendEventWithName:@"downloadBegin" body:@{
-                        @"id": taskConfig.id,
+                        @"id": taskConfig.configId,
                         @"expectedBytes": [NSNumber numberWithLongLong: bytesTotalExpectedToWrite],
                         @"headers": responseHeaders
                     }];
@@ -573,8 +504,8 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                 taskConfig.reportedBegin = YES;
             }
 
-            NSNumber *prevPercent = idToPercentMap[taskConfig.id];
-            NSNumber *prevBytes = idToLastBytesMap[taskConfig.id];
+            NSNumber *prevPercent = idToPercentMap[taskConfig.configId];
+            NSNumber *prevBytes = idToLastBytesMap[taskConfig.configId];
             NSNumber *percent;
             BOOL percentThresholdMet = NO;
             
@@ -592,13 +523,13 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
             
             // Report progress if either threshold is met, or if total bytes unknown (for streams)
             if (percentThresholdMet || bytesThresholdMet || bytesTotalExpectedToWrite <= 0) {
-                progressReports[taskConfig.id] = @{
-                    @"id": taskConfig.id,
+                progressReports[taskConfig.configId] = @{
+                    @"id": taskConfig.configId,
                     @"bytesDownloaded": [NSNumber numberWithLongLong: bytesTotalWritten],
                     @"bytesTotal": [NSNumber numberWithLongLong: bytesTotalExpectedToWrite]
                 };
-                idToPercentMap[taskConfig.id] = percent;
-                idToLastBytesMap[taskConfig.id] = [NSNumber numberWithLongLong: bytesTotalWritten];
+                idToPercentMap[taskConfig.configId] = percent;
+                idToLastBytesMap[taskConfig.configId] = [NSNumber numberWithLongLong: bytesTotalWritten];
             }
 
             NSDate *now = [[NSDate alloc] init];
@@ -630,7 +561,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
         if (error.code != -999) {
             if (self != nil) {
                 [self sendEventWithName:@"downloadFailed" body:@{
-                    @"id": taskConfig.id,
+                    @"id": taskConfig.configId,
                     @"error": [error localizedDescription],
                     // TODO
                     @"errorCode": @-1
@@ -768,16 +699,13 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
     return path;
 }
 
-#ifdef RCT_NEW_ARCH_ENABLED
-- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
-    (const facebook::react::ObjCTurboModule::InitParams &)params
-{
-    return std::make_shared<facebook::react::NativeRNBackgroundDownloaderSpecJSI>(params);
-}
-#endif
-
-- (void)completeHandler:(NSString *)jobId {
-    [self completeHandler:jobId resolver:nil rejecter:nil];
-}
-
 @end
+
+// New Architecture TurboModule method temporarily disabled
+// #ifdef RCT_NEW_ARCH_ENABLED
+// - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
+//     (const facebook::react::ObjCTurboModule::InitParams &)params
+// {
+//     return std::make_shared<facebook::react::NativeRNBackgroundDownloaderSpecJSI>(params);
+// }
+// #endif

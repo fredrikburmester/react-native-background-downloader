@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B3E7B58A1CC2AC0600A0062D /* RNBackgroundDownloader.m in Sources */ = {isa = PBXBuildFile; fileRef = B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.m */; };
+        B3E7B58A1CC2AC0600A0062D /* RNBackgroundDownloader.mm in Sources */ = {isa = PBXBuildFile; fileRef = B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.mm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -26,7 +26,7 @@
 		134814201AA4EA6300B7C361 /* libRNBackgroundDownloader.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libRNBackgroundDownloader.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		565BF70F208F2C7C00F66231 /* RNBGDTaskConfig.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = RNBGDTaskConfig.h; sourceTree = "<group>"; };
 		B3E7B5881CC2AC0600A0062D /* RNBackgroundDownloader.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = RNBackgroundDownloader.h; sourceTree = "<group>"; };
-		B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = RNBackgroundDownloader.m; sourceTree = "<group>"; };
+        B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = RNBackgroundDownloader.mm; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,8 +52,8 @@
 			isa = PBXGroup;
 			children = (
 				565BF70F208F2C7C00F66231 /* RNBGDTaskConfig.h */,
-				B3E7B5881CC2AC0600A0062D /* RNBackgroundDownloader.h */,
-				B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.m */,
+                B3E7B5881CC2AC0600A0062D /* RNBackgroundDownloader.h */,
+                B3E7B5891CC2AC0600A0062D /* RNBackgroundDownloader.mm */,
 				134814211AA4EA7D00B7C361 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -115,7 +115,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B3E7B58A1CC2AC0600A0062D /* RNBackgroundDownloader.m in Sources */,
+                B3E7B58A1CC2AC0600A0062D /* RNBackgroundDownloader.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
