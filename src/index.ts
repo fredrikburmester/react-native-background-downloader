@@ -4,14 +4,20 @@ import NativeRNBackgroundDownloader from "./NativeRNBackgroundDownloader";
 import { DownloadOptions } from "./index.d";
 
 const { RNBackgroundDownloader } = NativeModules;
-// Use the same architecture-aware native module for event emitter as for method calls
-// This ensures compatibility with both Old Architecture (Bridge) and New Architecture (TurboModules)
+
+// CRITICAL FIX: Use RNBackgroundDownloader (from NativeModules) for event emitter
+// This is the actual module that emits events, not the TurboModule spec
 let RNBackgroundDownloaderEmitter;
 try {
-  if (NativeRNBackgroundDownloader) {
-    RNBackgroundDownloaderEmitter = new NativeEventEmitter(
-      NativeRNBackgroundDownloader
+  // Try NativeRNBackgroundDownloader first (new arch), fallback to RNBackgroundDownloader (old arch)
+  const nativeModule = NativeRNBackgroundDownloader || RNBackgroundDownloader;
+
+  if (nativeModule) {
+    console.log(
+      "[RNBackgroundDownloader] Creating event emitter from native module"
     );
+    RNBackgroundDownloaderEmitter = new NativeEventEmitter(nativeModule);
+    console.log("[RNBackgroundDownloader] Event emitter created successfully");
   } else {
     console.warn(
       "[RNBackgroundDownloader] Native module not available for event emitter, using mock"
@@ -50,6 +56,7 @@ function log(...args) {
   if (config.isLogsEnabled) console.log("[RNBackgroundDownloader]", ...args);
 }
 
+console.log("[RNBackgroundDownloader] Registering downloadBegin listener");
 RNBackgroundDownloaderEmitter.addListener(
   "downloadBegin",
   ({ id, ...rest }) => {
@@ -70,7 +77,9 @@ RNBackgroundDownloaderEmitter.addListener(
     }
   }
 );
+console.log("[RNBackgroundDownloader] downloadBegin listener registered");
 
+console.log("[RNBackgroundDownloader] Registering downloadProgress listener");
 RNBackgroundDownloaderEmitter.addListener("downloadProgress", (events) => {
   log("[RNBackgroundDownloader] downloadProgress event received", {
     isArray: Array.isArray(events),
@@ -94,7 +103,9 @@ RNBackgroundDownloaderEmitter.addListener("downloadProgress", (events) => {
     }
   }
 });
+console.log("[RNBackgroundDownloader] downloadProgress listener registered");
 
+console.log("[RNBackgroundDownloader] Registering downloadComplete listener");
 RNBackgroundDownloaderEmitter.addListener(
   "downloadComplete",
   ({ id, ...rest }) => {
@@ -116,7 +127,9 @@ RNBackgroundDownloaderEmitter.addListener(
     tasksMap.delete(id);
   }
 );
+console.log("[RNBackgroundDownloader] downloadComplete listener registered");
 
+console.log("[RNBackgroundDownloader] Registering downloadFailed listener");
 RNBackgroundDownloaderEmitter.addListener(
   "downloadFailed",
   ({ id, ...rest }) => {
@@ -136,6 +149,10 @@ RNBackgroundDownloaderEmitter.addListener(
 
     tasksMap.delete(id);
   }
+);
+console.log("[RNBackgroundDownloader] downloadFailed listener registered");
+console.log(
+  "[RNBackgroundDownloader] All event listeners registered successfully"
 );
 
 export function setConfig({
@@ -288,7 +305,7 @@ export function download(options: DownloadOptions) {
     id: options.id,
     metadata: options.metadata,
   });
-  
+
   log("[RNBackgroundDownloader] Registering task in tasksMap", {
     id: options.id,
     mapSize: tasksMap.size,
