@@ -36,6 +36,28 @@ static CompletionHandler storedCompletionHandler;
 
 RCT_EXPORT_MODULE();
 
+- (void)startObserving
+{
+    DLog(@"[RNBackgroundDownloader] - [startObserving] Event listeners registered");
+}
+
+- (void)stopObserving
+{
+    DLog(@"[RNBackgroundDownloader] - [stopObserving] Event listeners removed");
+}
+
+RCT_EXPORT_METHOD(addListener:(NSString *)eventName)
+{
+    DLog(@"[RNBackgroundDownloader] - [addListener] %@", eventName);
+    // Keep track of listeners (required for RCTEventEmitter)
+}
+
+RCT_EXPORT_METHOD(removeListeners:(double)count)
+{
+    DLog(@"[RNBackgroundDownloader] - [removeListeners] count: %f", count);
+    // Keep track of listeners (required for RCTEventEmitter)
+}
+
 - (dispatch_queue_t)methodQueue
 {
     return dispatch_queue_create("com.eko.backgrounddownloader", DISPATCH_QUEUE_SERIAL);
@@ -448,6 +470,7 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
             if (self != nil) {
                 if (error == nil) {
                     NSDictionary *responseHeaders = ((NSHTTPURLResponse *)downloadTask.response).allHeaderFields;
+                    DLog(@"[RNBackgroundDownloader] Sending downloadComplete event for id: %@", taskConfig.configId);
                     [self sendEventWithName:@"downloadComplete" body:@{
                         @"id": taskConfig.configId,
                         @"headers": responseHeaders,
@@ -455,13 +478,16 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
                         @"bytesDownloaded": [NSNumber numberWithLongLong:downloadTask.countOfBytesReceived],
                         @"bytesTotal": [NSNumber numberWithLongLong:downloadTask.countOfBytesExpectedToReceive]
                     }];
+                    DLog(@"[RNBackgroundDownloader] downloadComplete event sent for id: %@", taskConfig.configId);
                 } else {
+                    DLog(@"[RNBackgroundDownloader] Sending downloadFailed event for id: %@, error: %@", taskConfig.configId, [error localizedDescription]);
                     [self sendEventWithName:@"downloadFailed" body:@{
                         @"id": taskConfig.configId,
                         @"error": [error localizedDescription],
                         // TODO
                         @"errorCode": @-1
                     }];
+                    DLog(@"[RNBackgroundDownloader] downloadFailed event sent for id: %@", taskConfig.configId);
                 }
             }
 
@@ -487,11 +513,13 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
             if (!taskConfig.reportedBegin) {
                 NSDictionary *responseHeaders = ((NSHTTPURLResponse *)downloadTask.response).allHeaderFields;
                 if (self != nil) {
+                    DLog(@"[RNBackgroundDownloader] Sending downloadBegin event for id: %@", taskConfig.configId);
                     [self sendEventWithName:@"downloadBegin" body:@{
                         @"id": taskConfig.configId,
                         @"expectedBytes": [NSNumber numberWithLongLong: bytesTotalExpectedToWrite],
                         @"headers": responseHeaders
                     }];
+                    DLog(@"[RNBackgroundDownloader] downloadBegin event sent for id: %@", taskConfig.configId);
                 }
                 taskConfig.reportedBegin = YES;
             }
@@ -527,7 +555,10 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
             NSDate *now = [[NSDate alloc] init];
             if ([now timeIntervalSinceDate:lastProgressReportedAt] > progressInterval && progressReports.count > 0) {
                 if (self != nil) {
-                    [self sendEventWithName:@"downloadProgress" body:[progressReports allValues]];
+                    NSArray *progressArray = [progressReports allValues];
+                    DLog(@"[RNBackgroundDownloader] Sending downloadProgress event with %lu task(s)", (unsigned long)progressArray.count);
+                    [self sendEventWithName:@"downloadProgress" body:progressArray];
+                    DLog(@"[RNBackgroundDownloader] downloadProgress event sent");
                 }
                 lastProgressReportedAt = now;
                 [progressReports removeAllObjects];
@@ -552,12 +583,14 @@ RCT_EXPORT_METHOD(checkForExistingDownloads: (RCTPromiseResolveBlock)resolve rej
         // Required to continue resume tasks.
         if (error.code != -999) {
             if (self != nil) {
+                DLog(@"[RNBackgroundDownloader] Sending downloadFailed event for id: %@, error code: %ld", taskConfig.configId, (long)error.code);
                 [self sendEventWithName:@"downloadFailed" body:@{
                     @"id": taskConfig.configId,
                     @"error": [error localizedDescription],
                     // TODO
                     @"errorCode": @-1
                 }];
+                DLog(@"[RNBackgroundDownloader] downloadFailed event sent for id: %@", taskConfig.configId);
             }
             [self removeTaskFromMap:task];
         }
