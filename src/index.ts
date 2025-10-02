@@ -5,18 +5,18 @@ import { DownloadOptions } from "./index.d";
 
 const { RNBackgroundDownloader } = NativeModules;
 
-// CRITICAL FIX: Use RNBackgroundDownloader (from NativeModules) for event emitter
-// This is the actual module that emits events, not the TurboModule spec
+// CRITICAL FIX: Always use RNBackgroundDownloader (from NativeModules) for event emitter
+// Even with New Architecture (TurboModules), events are emitted through the bridge module,
+// not the TurboModule. Using the TurboModule for NativeEventEmitter causes events to be lost.
 let RNBackgroundDownloaderEmitter;
 try {
-  // Try NativeRNBackgroundDownloader first (new arch), fallback to RNBackgroundDownloader (old arch)
-  const nativeModule = NativeRNBackgroundDownloader || RNBackgroundDownloader;
-
-  if (nativeModule) {
+  if (RNBackgroundDownloader) {
     console.log(
-      "[RNBackgroundDownloader] Creating event emitter from native module"
+      "[RNBackgroundDownloader] Creating event emitter from bridge module (RNBackgroundDownloader)"
     );
-    RNBackgroundDownloaderEmitter = new NativeEventEmitter(nativeModule);
+    RNBackgroundDownloaderEmitter = new NativeEventEmitter(
+      RNBackgroundDownloader
+    );
     console.log("[RNBackgroundDownloader] Event emitter created successfully");
   } else {
     console.warn(
@@ -54,6 +54,17 @@ const config = {
 
 function log(...args) {
   if (config.isLogsEnabled) console.log("[RNBackgroundDownloader]", ...args);
+}
+
+// Notify native module that we're interested in these events (required for New Architecture)
+if (NativeRNBackgroundDownloader?.addListener) {
+  console.log(
+    "[RNBackgroundDownloader] Notifying native module of event listeners"
+  );
+  NativeRNBackgroundDownloader.addListener("downloadBegin");
+  NativeRNBackgroundDownloader.addListener("downloadProgress");
+  NativeRNBackgroundDownloader.addListener("downloadComplete");
+  NativeRNBackgroundDownloader.addListener("downloadFailed");
 }
 
 console.log("[RNBackgroundDownloader] Registering downloadBegin listener");
