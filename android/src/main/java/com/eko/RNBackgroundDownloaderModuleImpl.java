@@ -25,8 +25,6 @@ import android.app.DownloadManager.Request;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -64,11 +62,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   private static final int TASK_CANCELING = 2;
   private static final int TASK_COMPLETED = 3;
 
-  private static final int ERR_STORAGE_FULL = 0;
-  private static final int ERR_NO_INTERNET = 1;
-  private static final int ERR_NO_WRITE_PERMISSION = 2;
-  private static final int ERR_FILE_NOT_FOUND = 3;
-  private static final int ERR_OTHERS = 100;
   private final ExecutorService cachedExecutorPool = Executors.newCachedThreadPool();
   private final ExecutorService fixedExecutorPool = Executors.newFixedThreadPool(1);
   private static final Map<Integer, Integer> stateMap = new HashMap<Integer, Integer>() {
@@ -94,36 +87,26 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   private final Map<String, Future<OnProgressState>> configIdToProgressFuture = new HashMap<>();
   private final Map<String, WritableMap> progressReports = new HashMap<>();
   private int progressInterval = 0;
-  private long progressMinBytes = 1024 * 1024; // Default 1MB
+  private long progressMinBytes = 1024 * 1024;
   private Date lastProgressReportedAt = new Date();
   private DeviceEventManagerModule.RCTDeviceEventEmitter ee;
 
   public RNBackgroundDownloaderModuleImpl(ReactApplicationContext reactContext) {
     super(reactContext);
     
-    // Initialize SharedPreferences as fallback
     sharedPreferences = reactContext.getSharedPreferences(getName() + "_prefs", Context.MODE_PRIVATE);
     
-    // Try to initialize MMKV with comprehensive error handling
     try {
       MMKV.initialize(reactContext);
       mmkv = MMKV.mmkvWithID(getName());
       isMMKVAvailable = true;
       Log.d(getName(), "MMKV initialized successfully");
     } catch (UnsatisfiedLinkError e) {
-      Log.e(getName(), "Failed to initialize MMKV (libmmkv.so not found): " + e.getMessage());
-      Log.w(getName(), "This may be due to unsupported architecture (x86/ARMv7). Using SharedPreferences fallback.");
-      Log.w(getName(), "Download persistence across app restarts will use basic storage.");
-      mmkv = null;
-      isMMKVAvailable = false;
-    } catch (NoClassDefFoundError e) {
-      Log.e(getName(), "MMKV classes not found: " + e.getMessage());
-      Log.w(getName(), "MMKV library not available on this architecture. Using SharedPreferences fallback.");
+      Log.e(getName(), "Failed to initialize MMKV: " + e.getMessage());
       mmkv = null;
       isMMKVAvailable = false;
     } catch (Exception e) {
       Log.e(getName(), "Failed to initialize MMKV: " + e.getMessage());
-      Log.w(getName(), "Using SharedPreferences fallback for persistence.");
       mmkv = null;
       isMMKVAvailable = false;
     }
@@ -143,7 +126,7 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   @Nullable
   @Override
   public Map<String, Object> getConstants() {
-    Context context =  this.getReactApplicationContext();
+    Context context = this.getReactApplicationContext();
     Map<String, Object> constants = new HashMap<>();
 
     File externalDirectory = context.getExternalFilesDir(null);
@@ -157,8 +140,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     constants.put("TaskSuspended", TASK_SUSPENDED);
     constants.put("TaskCanceling", TASK_CANCELING);
     constants.put("TaskCompleted", TASK_COMPLETED);
-    
-    // Expose storage type information for debugging/monitoring
     constants.put("isMMKVAvailable", isMMKVAvailable);
     constants.put("storageType", isMMKVAvailable ? "MMKV" : "SharedPreferences");
 
@@ -213,12 +194,9 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
             }
 
             if (localUri != null) {
-              // Prevent memory leaks from MediaScanner.
-              // Download successful, clean task after media scanning.
               String[] paths = new String[]{localUri};
               MediaScannerConnection.scanFile(context, paths, null, (path, uri) -> stopTask(config.id));
             } else {
-              // Download failed, clean task.
               stopTask(config.id);
             }
           }
@@ -229,10 +207,7 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     compatRegisterReceiver(context, downloadReceiver, filter, true);
   }
 
-  // TAKEN FROM
-  // https://github.com/facebook/react-native/pull/38256/files#diff-d5e21477eeadeb0c536d5870f487a8528f9a16ae928c397fec7b255805cc8ad3
-  private void compatRegisterReceiver(Context context, BroadcastReceiver receiver, IntentFilter filter,
-      boolean exported) {
+  private void compatRegisterReceiver(Context context, BroadcastReceiver receiver, IntentFilter filter, boolean exported) {
     if (Build.VERSION.SDK_INT >= 34 && context.getApplicationInfo().targetSdkVersion >= 34) {
       context.registerReceiver(
           receiver, filter, exported ? Context.RECEIVER_EXPORTED : Context.RECEIVER_NOT_EXPORTED);
@@ -288,134 +263,34 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     }
   }
 
-  /**
-   * Resolve redirects for a URL up to maxRedirects limit
-   * @param originalUrl The original URL to follow
-   * @param maxRedirects Maximum number of redirects to follow (0 means no redirect resolution)
-   * @param headers Headers to include in redirect resolution requests
-   * @return The final resolved URL, or original URL if maxRedirects is 0 or resolution fails
-   */
-  private String resolveRedirects(String originalUrl, int maxRedirects, ReadableMap headers) {
-    if (maxRedirects <= 0) {
-      return originalUrl;
-    }
-
-    try {
-      String currentUrl = originalUrl;
-      int redirectCount = 0;
-      
-      while (redirectCount < maxRedirects) {
-        java.net.URL url = new java.net.URL(currentUrl);
-        java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
-        
-        // Add headers to the redirect resolution request
-        if (headers != null) {
-          ReadableMapKeySetIterator iterator = headers.keySetIterator();
-          while (iterator.hasNextKey()) {
-            String headerKey = iterator.nextKey();
-            connection.setRequestProperty(headerKey, headers.getString(headerKey));
-          }
-        }
-        
-        // Add default headers for consistency with DownloadManager
-        connection.setRequestProperty("Connection", "keep-alive");
-        connection.setRequestProperty("Keep-Alive", "timeout=600, max=1000");
-        if (!hasUserAgentHeader(headers)) {
-          connection.setRequestProperty("User-Agent", "ReactNative-BackgroundDownloader/3.2.6");
-        }
-        
-        connection.setInstanceFollowRedirects(false);
-        connection.setRequestMethod("HEAD"); // Use HEAD to avoid downloading content
-        connection.setConnectTimeout(10000); // 10 second timeout
-        connection.setReadTimeout(10000);
-        
-        int responseCode = connection.getResponseCode();
-        
-        if (responseCode >= 300 && responseCode < 400) {
-          // This is a redirect
-          String location = connection.getHeaderField("Location");
-          if (location == null) {
-            Log.w(getName(), "Redirect response without Location header at: " + currentUrl);
-            break;
-          }
-          
-          // Handle relative URLs
-          if (location.startsWith("/")) {
-            java.net.URL baseUrl = new java.net.URL(currentUrl);
-            location = baseUrl.getProtocol() + "://" + baseUrl.getHost() + location;
-          } else if (!location.startsWith("http")) {
-            java.net.URL baseUrl = new java.net.URL(currentUrl);
-            location = baseUrl.getProtocol() + "://" + baseUrl.getHost() + "/" + location;
-          }
-          
-          Log.d(getName(), "Redirect " + (redirectCount + 1) + "/" + maxRedirects + ": " + currentUrl + " -> " + location);
-          currentUrl = location;
-          redirectCount++;
-        } else {
-          // Not a redirect, we've found the final URL
-          break;
-        }
-        
-        connection.disconnect();
-      }
-      
-      if (redirectCount >= maxRedirects) {
-        Log.w(getName(), "Reached maximum redirects (" + maxRedirects + ") for URL: " + originalUrl + 
-              ". Final URL: " + currentUrl);
-      } else {
-        Log.d(getName(), "Resolved URL after " + redirectCount + " redirects: " + currentUrl);
-      }
-      
-      return currentUrl;
-      
-    } catch (Exception e) {
-      Log.e(getName(), "Failed to resolve redirects for URL: " + originalUrl + ". Error: " + e.getMessage());
-      // Return original URL if redirect resolution fails
-      return originalUrl;
-    }
-  }
-
   @ReactMethod
-  @SuppressWarnings("unused")
-  public void download(ReadableMap options) {
-    final String id = options.getString("id");
-    String url = options.getString("url");
-    String destination = options.getString("destination");
-    ReadableMap headers = options.getMap("headers");
-    String metadata = options.getString("metadata");
-    String notificationTitle = options.getString("notificationTitle");
-    int progressIntervalScope = options.getInt("progressInterval");
-    if (progressIntervalScope > 0) {
-      progressInterval = progressIntervalScope;
-      saveConfigMap();
-    }
-
-    double progressMinBytesScope = options.getDouble("progressMinBytes");
-    if (progressMinBytesScope > 0) {
-      progressMinBytes = (long) progressMinBytesScope;
-      saveConfigMap();
-    }
-
-    boolean isAllowedOverRoaming = options.getBoolean("isAllowedOverRoaming");
-    boolean isAllowedOverMetered = options.getBoolean("isAllowedOverMetered");
-    boolean isNotificationVisible = options.getBoolean("isNotificationVisible");
-
-    // Get maxRedirects parameter
-    int maxRedirects = 0;
-    if (options.hasKey("maxRedirects")) {
-      maxRedirects = options.getInt("maxRedirects");
-    }
-
-    if (id == null || url == null || destination == null) {
-      Log.e(getName(),"download: id, url and destination must be set.");
+  public void downloadFile(
+      String url,
+      String destinationPath,
+      String id,
+      @Nullable ReadableMap headers,
+      @Nullable String metadata,
+      double progressIntervalScope,
+      double progressMinBytesScope,
+      boolean isAllowedOverRoaming,
+      boolean isAllowedOverMetered,
+      boolean isNotificationVisible,
+      @Nullable String notificationTitle,
+      Promise promise
+  ) {
+    if (id == null || url == null || destinationPath == null) {
+      promise.reject("E_PARAMS", "id, url and destinationPath must be set");
       return;
     }
 
-    // Resolve redirects if maxRedirects is specified
-    if (maxRedirects > 0) {
-      Log.d(getName(), "Resolving redirects for URL: " + url + " (maxRedirects: " + maxRedirects + ")");
-      url = resolveRedirects(url, maxRedirects, headers);
-      Log.d(getName(), "Final resolved URL: " + url);
+    if (progressIntervalScope > 0) {
+      progressInterval = (int) progressIntervalScope;
+      saveConfigMap();
+    }
+
+    if (progressMinBytesScope > 0) {
+      progressMinBytes = (long) progressMinBytesScope;
+      saveConfigMap();
     }
 
     final Request request = new Request(Uri.parse(url));
@@ -430,13 +305,9 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
       request.setTitle(notificationTitle);
     }
 
-    // Add default headers to improve connection handling for slow-responding URLs
-    // These headers encourage longer connections and help prevent premature
-    // timeouts
     request.addRequestHeader("Connection", "keep-alive");
     request.addRequestHeader("Keep-Alive", "timeout=600, max=1000");
 
-    // Add a proper User-Agent to improve server compatibility
     if (!hasUserAgentHeader(headers)) {
       request.addRequestHeader("User-Agent", "ReactNative-BackgroundDownloader/3.2.6");
     }
@@ -450,12 +321,12 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     }
 
     int uuid = (int) (System.currentTimeMillis() & 0xfffffff);
-    String extension = MimeTypeMap.getFileExtensionFromUrl(destination);
+    String extension = MimeTypeMap.getFileExtensionFromUrl(destinationPath);
     String filename = uuid + "." + extension;
     request.setDestinationInExternalFilesDir(this.getReactApplicationContext(), null, filename);
 
     long downloadId = downloader.download(request);
-    RNBGDTaskConfig config = new RNBGDTaskConfig(id, url, destination, metadata, notificationTitle);
+    RNBGDTaskConfig config = new RNBGDTaskConfig(id, url, destinationPath, metadata, notificationTitle);
 
     synchronized (sharedLock) {
       configIdToDownloadId.put(id, downloadId);
@@ -464,51 +335,22 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
       saveDownloadIdToConfigMap();
       resumeTasks(downloadId, config);
     }
-  }
 
-  // Pause functionality is not supported by Android DownloadManager.
-  // This method will throw an UnsupportedOperationException to clearly indicate
-  // that pause is not available on Android platform.
-  @ReactMethod
-  @SuppressWarnings("unused")
-  public void pauseTask(String configId) {
-    synchronized (sharedLock) {
-      Long downloadId = configIdToDownloadId.get(configId);
-      if (downloadId != null) {
-        try {
-          downloader.pause(downloadId);
-        } catch (UnsupportedOperationException e) {
-          Log.w("RNBackgroundDownloader", "pauseTask: " + e.getMessage());
-          // Note: We don't rethrow the exception to avoid crashing the JS thread.
-          // The limitation is already documented and expected.
-        }
-      }
-    }
-  }
-
-  // Resume functionality is not supported by Android DownloadManager.
-  // This method will throw an UnsupportedOperationException to clearly indicate
-  // that resume is not available on Android platform.
-  @ReactMethod
-  @SuppressWarnings("unused")
-  public void resumeTask(String configId) {
-    synchronized (sharedLock) {
-      Long downloadId = configIdToDownloadId.get(configId);
-      if (downloadId != null) {
-        try {
-          downloader.resume(downloadId);
-        } catch (UnsupportedOperationException e) {
-          Log.w("RNBackgroundDownloader", "resumeTask: " + e.getMessage());
-          // Note: We don't rethrow the exception to avoid crashing the JS thread.
-          // The limitation is already documented and expected.
-        }
-      }
-    }
+    promise.resolve(null);
   }
 
   @ReactMethod
-  @SuppressWarnings("unused")
-  public void stopTask(String configId) {
+  public void pauseDownload(String configId) {
+    Log.w(getName(), "pauseDownload: Pause is not supported by Android DownloadManager");
+  }
+
+  @ReactMethod
+  public void resumeDownload(String configId) {
+    Log.w(getName(), "resumeDownload: Resume is not supported by Android DownloadManager");
+  }
+
+  @ReactMethod
+  public void cancelDownload(String configId) {
     synchronized (sharedLock) {
       Long downloadId = configIdToDownloadId.get(configId);
       if (downloadId != null) {
@@ -520,34 +362,12 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   }
 
   @ReactMethod
-  @SuppressWarnings("unused")
-  public void completeHandler(String configId) {
-    // Firebase Performance compatibility: Add defensive programming to prevent crashes
-    // when Firebase Performance SDK is installed and uses bytecode instrumentation
-
-    Log.d(getName(), "completeHandler called with configId: " + configId);
-
-    // Defensive programming: Validate parameters
-    if (configId == null || configId.isEmpty()) {
-      Log.w(getName(), "completeHandler: Invalid configId provided");
-      return;
-    }
-
-    try {
-      // Currently this method doesn't have any implementation on Android
-      // as completion handlers are handled differently than iOS.
-      // This defensive structure ensures Firebase Performance compatibility.
-      Log.d(getName(), "completeHandler executed successfully for configId: " + configId);
-
-    } catch (Exception e) {
-      // Catch any potential exceptions that might be thrown due to Firebase Performance
-      // bytecode instrumentation interfering with method dispatch
-      Log.e(getName(), "completeHandler: Exception occurred: " + Log.getStackTraceString(e));
-    }
+  public void completeHandler(String jobId, Promise promise) {
+    Log.d(getName(), "completeHandler called with jobId: " + jobId);
+    promise.resolve(null);
   }
 
   @ReactMethod
-  @SuppressWarnings("unused")
   public void checkForExistingDownloads(final Promise promise) {
     WritableArray foundTasks = Arguments.createArray();
 
@@ -564,7 +384,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
 
               if (config != null) {
                 int status = downloadStatus.getInt("status");
-                // Handle completed downloads that weren't processed
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                   String localUri = downloadStatus.getString("localUri");
                   if (localUri != null) {
@@ -573,13 +392,11 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
                       future.get();
                     } catch (Exception e) {
                       Log.e(getName(), "Error moving completed download file: " + e.getMessage());
-                      // Continue with normal processing even if file move fails
                     }
                   }
                 }
 
                 WritableMap params = Arguments.createMap();
-
                 params.putString("id", config.id);
                 params.putString("metadata", config.metadata);
                 Integer statusMapping = stateMap.get(status);
@@ -610,11 +427,9 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   }
 
   @ReactMethod
-  @SuppressWarnings("unused")
   public void addListener(String eventName) {}
 
   @ReactMethod
-  @SuppressWarnings("unused")
   public void removeListeners(Integer count) {}
 
   private void onBeginDownload(String configId, WritableMap headers, long expectedBytes) {
@@ -630,13 +445,11 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     Long existLastBytes = configIdToLastBytes.get(configId);
     double prevPercent = existPercent != null ? existPercent : 0.0;
     long prevBytes = existLastBytes != null ? existLastBytes : 0;
-    double percent = bytesTotal > 0.0 ?  ((double) bytesDownloaded / bytesTotal) : 0.0;
+    double percent = bytesTotal > 0.0 ? ((double) bytesDownloaded / bytesTotal) : 0.0;
 
-    // Check if we should report progress based on percentage OR bytes threshold
     boolean percentThresholdMet = percent - prevPercent > 0.01;
     boolean bytesThresholdMet = bytesDownloaded - prevBytes >= progressMinBytes;
 
-    // Report progress if either threshold is met, or if total bytes unknown (for realtime streams)
     if (percentThresholdMet || bytesThresholdMet || bytesTotal <= 0) {
       WritableMap params = Arguments.createMap();
       params.putString("id", configId);
@@ -649,9 +462,8 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
 
     Date now = new Date();
     boolean isReportTimeDifference = now.getTime() - lastProgressReportedAt.getTime() > progressInterval;
-    boolean isReportNotEmpty =!progressReports.isEmpty();
+    boolean isReportNotEmpty = !progressReports.isEmpty();
     if (isReportTimeDifference && isReportNotEmpty) {
-      // Extra steps to avoid map always consumed errors.
       List<WritableMap> reportsList = new ArrayList<>(progressReports.values());
       WritableArray reportsArray = Arguments.createArray();
       for (WritableMap report : reportsList) {
@@ -668,9 +480,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
   private void onSuccessfulDownload(RNBGDTaskConfig config, WritableMap downloadStatus) {
     String localUri = downloadStatus.getString("localUri");
 
-    // TODO: We need to move it to a more suitable location.
-    //       Maybe somewhere in downloadReceiver?
-    // Feedback if any error occurs after downloading the file.
     try {
       Future<Boolean> future = setFileChangesBeforeCompletion(localUri, config.destination);
       future.get();
@@ -702,17 +511,10 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     int reason = downloadStatus.getInt("reason");
     String reasonText = downloadStatus.getString("reasonText");
 
-    // Enhanced handling for ERROR_CANNOT_RESUME (1008)
     if (reason == DownloadManager.ERROR_CANNOT_RESUME) {
-      Log.w(getName(), "ERROR_CANNOT_RESUME detected for download: " + config.id +
-            ". This is a known Android DownloadManager issue with larger files. " +
-            "Consider restarting the download or using smaller file segments.");
-
-      // Clean up the failed download entry
+      Log.w(getName(), "ERROR_CANNOT_RESUME detected for download: " + config.id);
       removeTaskFromMap(Long.parseLong(downloadStatus.getString("downloadId")));
-
-      // Provide more helpful error message
-      reasonText = "ERROR_CANNOT_RESUME - Unable to resume download. This may occur with large files due to Android DownloadManager limitations. Try restarting the download.";
+      reasonText = "ERROR_CANNOT_RESUME - Unable to resume download. Try restarting.";
     }
 
     WritableMap params = Arguments.createMap();
@@ -730,14 +532,10 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
         
         if (isMMKVAvailable && mmkv != null) {
           mmkv.encode(getName() + "_downloadIdToConfig", str);
-          Log.d(getName(), "Saved download config to MMKV");
         } else if (sharedPreferences != null) {
           sharedPreferences.edit()
             .putString(getName() + "_downloadIdToConfig", str)
             .apply();
-          Log.d(getName(), "Saved download config to SharedPreferences fallback");
-        } else {
-          Log.w(getName(), "No storage available, skipping download config persistence");
         }
       } catch (Exception e) {
         Log.e(getName(), "Failed to save download config: " + e.getMessage());
@@ -754,22 +552,14 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
         
         if (isMMKVAvailable && mmkv != null) {
           str = mmkv.decodeString(getName() + "_downloadIdToConfig");
-          if (str != null) {
-            Log.d(getName(), "Loaded download config from MMKV");
-          }
         } else if (sharedPreferences != null) {
           str = sharedPreferences.getString(getName() + "_downloadIdToConfig", null);
-          if (str != null) {
-            Log.d(getName(), "Loaded download config from SharedPreferences fallback");
-          }
         }
         
         if (str != null) {
           Gson gson = new Gson();
           TypeToken<Map<Long, RNBGDTaskConfig>> mapType = new TypeToken<Map<Long, RNBGDTaskConfig>>() {};
           downloadIdToConfig = gson.fromJson(str, mapType);
-        } else {
-          Log.d(getName(), "No existing download config found, starting with empty map");
         }
       } catch (Exception e) {
         Log.e(getName(), "Failed to load download config: " + e.getMessage());
@@ -784,15 +574,11 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
         if (isMMKVAvailable && mmkv != null) {
           mmkv.encode(getName() + "_progressInterval", progressInterval);
           mmkv.encode(getName() + "_progressMinBytes", progressMinBytes);
-          Log.d(getName(), "Saved config to MMKV");
         } else if (sharedPreferences != null) {
           sharedPreferences.edit()
             .putInt(getName() + "_progressInterval", progressInterval)
             .putLong(getName() + "_progressMinBytes", progressMinBytes)
             .apply();
-          Log.d(getName(), "Saved config to SharedPreferences fallback");
-        } else {
-          Log.w(getName(), "No storage available, skipping config persistence");
         }
       } catch (Exception e) {
         Log.e(getName(), "Failed to save config: " + e.getMessage());
@@ -812,7 +598,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
           if (progressMinBytesScope > 0) {
             progressMinBytes = progressMinBytesScope;
           }
-          Log.d(getName(), "Loaded config from MMKV");
         } else if (sharedPreferences != null) {
           int progressIntervalScope = sharedPreferences.getInt(getName() + "_progressInterval", 0);
           if (progressIntervalScope > 0) {
@@ -822,9 +607,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
           if (progressMinBytesScope > 0) {
             progressMinBytes = progressMinBytesScope;
           }
-          Log.d(getName(), "Loaded config from SharedPreferences fallback");
-        } else {
-          Log.d(getName(), "No storage available, using default config values");
         }
       } catch (Exception e) {
         Log.e(getName(), "Failed to load config: " + e.getMessage());
@@ -842,13 +624,24 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     }
   }
 
+  private void stopTask(String configId) {
+    synchronized (sharedLock) {
+      Long downloadId = configIdToDownloadId.get(configId);
+      if (downloadId != null) {
+        stopTaskProgress(configId);
+        removeTaskFromMap(downloadId);
+        downloader.cancel(downloadId);
+      }
+    }
+  }
+
   private Future<Boolean> setFileChangesBeforeCompletion(String targetSrc, String destinationSrc) {
     return fixedExecutorPool.submit(() -> {
       File file = new File(targetSrc);
       File destination = new File(destinationSrc);
       File destinationParent = null;
       try {
-        if(file.exists()) {
+        if (file.exists()) {
           FileUtils.rm(destination);
           destinationParent = FileUtils.mkdirParent(destination);
           FileUtils.mv(file, destination);
@@ -864,10 +657,6 @@ public class RNBackgroundDownloaderModuleImpl extends ReactContextBaseJavaModule
     });
   }
 
-  /**
-   * Check if the provided headers already contain a User-Agent header
-   * (case-insensitive)
-   */
   private boolean hasUserAgentHeader(@Nullable ReadableMap headers) {
     if (headers == null) {
       return false;

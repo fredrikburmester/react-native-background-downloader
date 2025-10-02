@@ -1,332 +1,155 @@
-import { NativeModules, NativeEventEmitter } from "react-native";
+import { NativeEventEmitter, Platform } from "react-native";
 import DownloadTask from "./DownloadTask";
 import NativeRNBackgroundDownloader from "./NativeRNBackgroundDownloader";
 import { DownloadOptions } from "./index.d";
 
-const { RNBackgroundDownloader } = NativeModules;
-
-// CRITICAL FIX: Always use RNBackgroundDownloader (from NativeModules) for event emitter
-// Even with New Architecture (TurboModules), events are emitted through the bridge module,
-// not the TurboModule. Using the TurboModule for NativeEventEmitter causes events to be lost.
-let RNBackgroundDownloaderEmitter;
-try {
-  if (RNBackgroundDownloader) {
-    console.log(
-      "[RNBackgroundDownloader] Creating event emitter from bridge module (RNBackgroundDownloader)"
-    );
-    RNBackgroundDownloaderEmitter = new NativeEventEmitter(
-      RNBackgroundDownloader
-    );
-    console.log("[RNBackgroundDownloader] Event emitter created successfully");
-  } else {
-    console.warn(
-      "[RNBackgroundDownloader] Native module not available for event emitter, using mock"
-    );
-    // Create a mock event emitter to prevent crashes
-    RNBackgroundDownloaderEmitter = {
-      addListener: () => ({ remove: () => {} }),
-      removeAllListeners: () => {},
-      removeSubscription: () => {},
-    };
-  }
-} catch (error) {
-  console.warn(
-    "[RNBackgroundDownloader] Failed to create event emitter:",
-    error.message || error
-  );
-  // Create a mock event emitter as fallback
-  RNBackgroundDownloaderEmitter = {
-    addListener: () => ({ remove: () => {} }),
-    removeAllListeners: () => {},
-    removeSubscription: () => {},
-  };
-}
-
 const MIN_PROGRESS_INTERVAL = 250;
-const tasksMap = new Map();
+const tasksMap = new Map<string, DownloadTask>();
 
 const config = {
-  headers: {},
+  headers: {} as Record<string, string>,
   progressInterval: 1000,
-  progressMinBytes: 1024 * 1024, // 1MB default
+  progressMinBytes: 1024 * 1024,
   isLogsEnabled: false,
 };
 
-function log(...args) {
-  if (config.isLogsEnabled) console.log("[RNBackgroundDownloader]", ...args);
-}
-
-// Notify native module that we're interested in these events (required for New Architecture)
-if (NativeRNBackgroundDownloader?.addListener) {
-  console.log(
-    "[RNBackgroundDownloader] Notifying native module of event listeners"
-  );
-  NativeRNBackgroundDownloader.addListener("downloadBegin");
-  NativeRNBackgroundDownloader.addListener("downloadProgress");
-  NativeRNBackgroundDownloader.addListener("downloadComplete");
-  NativeRNBackgroundDownloader.addListener("downloadFailed");
-}
-
-console.log("[RNBackgroundDownloader] Registering downloadBegin listener");
-RNBackgroundDownloaderEmitter.addListener(
-  "downloadBegin",
-  ({ id, ...rest }) => {
-    log("[RNBackgroundDownloader] downloadBegin event received", {
-      id,
-      hasTask: tasksMap.has(id),
-      totalTasks: tasksMap.size,
-    });
-    const task = tasksMap.get(id);
-    if (task) {
-      task.onBegin(rest);
-    } else {
-      console.warn(
-        `[RNBackgroundDownloader] downloadBegin: No task found for id "${id}". ` +
-          `This might happen if the download started before JS initialized. ` +
-          `Current tasks in map: [${Array.from(tasksMap.keys()).join(", ")}]`
-      );
-    }
+function log(...args: any[]) {
+  if (config.isLogsEnabled) {
+    console.log("[RNBackgroundDownloader]", ...args);
   }
+}
+
+// Create event emitter for the TurboModule
+const eventEmitter = new NativeEventEmitter(
+  NativeRNBackgroundDownloader as any
 );
-console.log("[RNBackgroundDownloader] downloadBegin listener registered");
 
-console.log("[RNBackgroundDownloader] Registering downloadProgress listener");
-RNBackgroundDownloaderEmitter.addListener("downloadProgress", (events) => {
-  log("[RNBackgroundDownloader] downloadProgress event received", {
-    isArray: Array.isArray(events),
-    eventCount: Array.isArray(events) ? events.length : "not an array",
-    totalTasks: tasksMap.size,
-  });
+// Register event listeners
+eventEmitter.addListener("downloadBegin", ({ id, ...rest }) => {
+  log("downloadBegin event received", id);
+  const task = tasksMap.get(id);
+  if (task) {
+    task.onBegin(rest);
+  }
+});
 
-  // Ensure events is always an array
+eventEmitter.addListener("downloadProgress", (events) => {
+  log("downloadProgress event received");
   const eventArray = Array.isArray(events) ? events : [events];
 
   for (const event of eventArray) {
     const { id, ...rest } = event;
     const task = tasksMap.get(id);
     if (task) {
-      log("[RNBackgroundDownloader] Firing progress for task", id, rest);
       task.onProgress(rest);
-    } else {
-      log(
-        `[RNBackgroundDownloader] downloadProgress: No task found for id "${id}"`
-      );
     }
   }
 });
-console.log("[RNBackgroundDownloader] downloadProgress listener registered");
 
-console.log("[RNBackgroundDownloader] Registering downloadComplete listener");
-RNBackgroundDownloaderEmitter.addListener(
-  "downloadComplete",
-  ({ id, ...rest }) => {
-    console.log(
-      `[RNBackgroundDownloader] ===== downloadComplete EVENT RECEIVED =====`
-    );
-    console.log(`[RNBackgroundDownloader] Event details:`, {
-      id,
-      bytesDownloaded: rest.bytesDownloaded,
-      bytesTotal: rest.bytesTotal,
-      location: rest.location,
-      hasTask: tasksMap.has(id),
-      totalTasksInMap: tasksMap.size,
-      allTaskIds: Array.from(tasksMap.keys()),
-    });
-
-    const task = tasksMap.get(id);
-    if (task) {
-      console.log(
-        `[RNBackgroundDownloader] Task found in map, calling task.onDone() for id: ${id}`
-      );
-      console.log(
-        `[RNBackgroundDownloader] Task state before onDone: ${task.state}`
-      );
-      console.log(
-        `[RNBackgroundDownloader] Task has doneHandler: ${!!task.doneHandler}`
-      );
-
-      task.onDone(rest);
-
-      console.log(
-        `[RNBackgroundDownloader] task.onDone() completed for id: ${id}`
-      );
-      console.log(
-        `[RNBackgroundDownloader] Task state after onDone: ${task.state}`
-      );
-    } else {
-      console.warn(
-        `[RNBackgroundDownloader] ❌ downloadComplete: No task found for id "${id}". ` +
-          `This might happen if the download completed before JS initialized or after task was removed. ` +
-          `Available task IDs: [${Array.from(tasksMap.keys()).join(", ")}]`
-      );
-    }
-
-    console.log(`[RNBackgroundDownloader] Removing task ${id} from tasksMap`);
-    tasksMap.delete(id);
-    console.log(
-      `[RNBackgroundDownloader] Tasks remaining in map: ${tasksMap.size}`
-    );
-    console.log(
-      `[RNBackgroundDownloader] ===== downloadComplete PROCESSING COMPLETE =====`
-    );
+eventEmitter.addListener("downloadComplete", ({ id, ...rest }) => {
+  log("downloadComplete event received", id);
+  const task = tasksMap.get(id);
+  if (task) {
+    task.onDone(rest);
   }
-);
-console.log("[RNBackgroundDownloader] downloadComplete listener registered");
+  tasksMap.delete(id);
+});
 
-console.log("[RNBackgroundDownloader] Registering downloadFailed listener");
-RNBackgroundDownloaderEmitter.addListener(
-  "downloadFailed",
-  ({ id, ...rest }) => {
-    log("[RNBackgroundDownloader] downloadFailed event received", {
-      id,
-      hasTask: tasksMap.has(id),
-      error: rest.error,
-    });
-    const task = tasksMap.get(id);
-    if (task) {
-      task.onError(rest);
-    } else {
-      console.warn(
-        `[RNBackgroundDownloader] downloadFailed: No task found for id "${id}". Error: ${rest.error}`
-      );
-    }
-
-    tasksMap.delete(id);
+eventEmitter.addListener("downloadFailed", ({ id, ...rest }) => {
+  log("downloadFailed event received", id);
+  const task = tasksMap.get(id);
+  if (task) {
+    task.onError(rest);
   }
-);
-console.log("[RNBackgroundDownloader] downloadFailed listener registered");
-console.log(
-  "[RNBackgroundDownloader] All event listeners registered successfully"
-);
+  tasksMap.delete(id);
+});
+
+// Notify native that we're listening to events (required for New Architecture)
+if (NativeRNBackgroundDownloader.addListener) {
+  NativeRNBackgroundDownloader.addListener("downloadBegin");
+  NativeRNBackgroundDownloader.addListener("downloadProgress");
+  NativeRNBackgroundDownloader.addListener("downloadComplete");
+  NativeRNBackgroundDownloader.addListener("downloadFailed");
+}
 
 export function setConfig({
   headers,
   progressInterval,
   progressMinBytes,
   isLogsEnabled,
+}: {
+  headers?: Record<string, string>;
+  progressInterval?: number;
+  progressMinBytes?: number;
+  isLogsEnabled?: boolean;
 }) {
-  if (typeof headers === "object") config.headers = headers;
+  if (typeof headers === "object") {
+    config.headers = headers;
+  }
 
-  if (progressInterval != null)
+  if (progressInterval != null) {
     if (
       typeof progressInterval === "number" &&
       progressInterval >= MIN_PROGRESS_INTERVAL
-    )
+    ) {
       config.progressInterval = progressInterval;
-    else
+    } else {
       console.warn(
-        `[RNBackgroundDownloader] progressInterval must be a number >= ${MIN_PROGRESS_INTERVAL}. You passed ${progressInterval}`
+        `[RNBackgroundDownloader] progressInterval must be a number >= ${MIN_PROGRESS_INTERVAL}`
       );
+    }
+  }
 
-  if (progressMinBytes != null)
-    if (typeof progressMinBytes === "number" && progressMinBytes >= 0)
+  if (progressMinBytes != null) {
+    if (typeof progressMinBytes === "number" && progressMinBytes >= 0) {
       config.progressMinBytes = progressMinBytes;
-    else
+    } else {
       console.warn(
-        `[RNBackgroundDownloader] progressMinBytes must be a number >= 0. You passed ${progressMinBytes}`
+        `[RNBackgroundDownloader] progressMinBytes must be a number >= 0`
       );
+    }
+  }
 
-  if (typeof isLogsEnabled === "boolean") config.isLogsEnabled = isLogsEnabled;
+  if (typeof isLogsEnabled === "boolean") {
+    config.isLogsEnabled = isLogsEnabled;
+  }
 }
 
-export async function checkForExistingDownloads() {
-  log("[RNBackgroundDownloader] checkForExistingDownloads-1");
-
-  // Validate that the native module is available
-  if (!NativeRNBackgroundDownloader) {
-    console.warn(
-      "[RNBackgroundDownloader] Native module not available, returning empty array"
-    );
-    return [];
-  }
-
-  if (
-    typeof NativeRNBackgroundDownloader.checkForExistingDownloads !== "function"
-  ) {
-    console.warn(
-      "[RNBackgroundDownloader] checkForExistingDownloads method not available on native module, returning empty array"
-    );
-    return [];
-  }
+export async function checkForExistingDownloads(): Promise<DownloadTask[]> {
+  log("checkForExistingDownloads");
 
   try {
     const foundTasks =
       await NativeRNBackgroundDownloader.checkForExistingDownloads();
-    log("[RNBackgroundDownloader] checkForExistingDownloads-2", foundTasks);
-
-    // Ensure foundTasks is an array
-    if (!Array.isArray(foundTasks)) {
-      console.warn(
-        "[RNBackgroundDownloader] checkForExistingDownloads returned non-array, returning empty array:",
-        foundTasks
-      );
-      return [];
-    }
+    log("checkForExistingDownloads found", foundTasks.length, "tasks");
 
     return foundTasks
       .map((taskInfo) => {
-        console.log(
-          `[RNBackgroundDownloader] Processing existing task: ${taskInfo.id}`
-        );
-
-        // SECOND ARGUMENT RE-ASSIGNS EVENT HANDLERS
         const existingTask = tasksMap.get(taskInfo.id);
-        if (existingTask) {
-          console.log(
-            `[RNBackgroundDownloader] Task ${taskInfo.id} found in map, preserving handlers`
-          );
-          console.log(
-            `[RNBackgroundDownloader] Existing task has doneHandler: ${!!existingTask.doneHandler}`
-          );
-        }
-
         const task = new DownloadTask(taskInfo, existingTask);
-        log("[RNBackgroundDownloader] checkForExistingDownloads-3", taskInfo);
 
-        // Diagnostic logging for unknown content length
-        const hasUnknownContentLength = taskInfo.bytesTotal <= 0;
-        if (hasUnknownContentLength) {
-          console.log(
-            `[RNBackgroundDownloader] Task ${taskInfo.id} has unknown content length (bytesTotal: ${taskInfo.bytesTotal}), state: ${taskInfo.state}, bytesDownloaded: ${taskInfo.bytesDownloaded}`
-          );
-        }
-
-        if (taskInfo.state === RNBackgroundDownloader.TaskRunning) {
+        // Map native states to our state names
+        if (taskInfo.state === 0) {
           task.state = "DOWNLOADING";
-        } else if (taskInfo.state === RNBackgroundDownloader.TaskSuspended) {
+        } else if (taskInfo.state === 1) {
           task.state = "PAUSED";
-        } else if (taskInfo.state === RNBackgroundDownloader.TaskCanceling) {
-          task.stop();
-          return null;
-        } else if (taskInfo.state === RNBackgroundDownloader.TaskCompleted) {
-          // Handle unknown content length: if bytesTotal is -1 or 0, consider it done if state is completed
-          if (hasUnknownContentLength) {
-            console.log(
-              `[RNBackgroundDownloader] Task ${taskInfo.id} completed with unknown content length, marking as DONE`
-            );
-            task.state = "DONE";
-          } else if (taskInfo.bytesDownloaded === taskInfo.bytesTotal) {
+        } else if (taskInfo.state === 2) {
+          return null; // Canceling
+        } else if (taskInfo.state === 3) {
+          if (
+            taskInfo.bytesTotal <= 0 ||
+            taskInfo.bytesDownloaded === taskInfo.bytesTotal
+          ) {
             task.state = "DONE";
           } else {
-            // IOS completed the download but it was not done.
-            console.log(
-              `[RNBackgroundDownloader] Task ${taskInfo.id} marked as completed but bytes don't match (${taskInfo.bytesDownloaded}/${taskInfo.bytesTotal}), filtering out`
-            );
             return null;
           }
         }
 
-        console.log(
-          `[RNBackgroundDownloader] Adding task ${
-            taskInfo.id
-          } to tasksMap with state: ${
-            task.state
-          }, hasHandler: ${!!task.doneHandler}`
-        );
         tasksMap.set(taskInfo.id, task);
         return task;
       })
-      .filter((task) => !!task);
+      .filter((task): task is DownloadTask => task !== null);
   } catch (error) {
     console.error(
       "[RNBackgroundDownloader] Error in checkForExistingDownloads:",
@@ -337,104 +160,77 @@ export async function checkForExistingDownloads() {
 }
 
 export async function ensureDownloadsAreRunning() {
-  log("[RNBackgroundDownloader] ensureDownloadsAreRunning");
+  log("ensureDownloadsAreRunning");
   const tasks = await checkForExistingDownloads();
-  for (const task of tasks)
+  for (const task of tasks) {
     if (task.state === "DOWNLOADING") {
       task.pause();
       task.resume();
     }
+  }
 }
 
 export function completeHandler(jobId: string) {
-  if (!NativeRNBackgroundDownloader) {
-    console.warn(
-      "[RNBackgroundDownloader] Native module not available for completeHandler"
-    );
-    return;
-  }
-
   try {
-    const result = NativeRNBackgroundDownloader.completeHandler(jobId);
-    if (result instanceof Promise) return result;
-    return Promise.resolve(result);
+    return NativeRNBackgroundDownloader.completeHandler(jobId);
   } catch (error) {
     console.error("[RNBackgroundDownloader] Error in completeHandler:", error);
   }
 }
 
-export function download(options: DownloadOptions) {
-  log("[RNBackgroundDownloader] download called", {
-    id: options.id,
-    url: options.url?.substring(0, 50) + "...",
-  });
+export function download(options: DownloadOptions): DownloadTask {
+  log("download called", options.id);
 
-  if (!options.id || !options.url || !options.destination)
+  if (!options.id || !options.url || !options.destination) {
     throw new Error(
       "[RNBackgroundDownloader] id, url and destination are required"
     );
+  }
 
-  options.headers = { ...config.headers, ...options.headers };
+  const headers: Record<string, string> = {};
+  Object.entries({ ...config.headers, ...options.headers }).forEach(
+    ([key, value]) => {
+      if (value != null) {
+        headers[key] = value;
+      }
+    }
+  );
 
-  if (!(options.metadata && typeof options.metadata === "object"))
-    options.metadata = {};
+  const metadata =
+    options.metadata && typeof options.metadata === "object"
+      ? options.metadata
+      : {};
 
-  options.destination = options.destination.replace("file://", "");
+  const destination = options.destination.replace("file://", "");
 
-  if (options.isAllowedOverRoaming == null) options.isAllowedOverRoaming = true;
-  if (options.isAllowedOverMetered == null) options.isAllowedOverMetered = true;
-  if (options.isNotificationVisible == null)
-    options.isNotificationVisible = false;
+  const isAllowedOverRoaming = options.isAllowedOverRoaming ?? true;
+  const isAllowedOverMetered = options.isAllowedOverMetered ?? true;
+  const isNotificationVisible = options.isNotificationVisible ?? false;
 
   const task = new DownloadTask({
     id: options.id,
-    metadata: options.metadata,
+    metadata: metadata,
+    bytesDownloaded: 0,
+    bytesTotal: 0,
   });
 
-  console.log(
-    `[RNBackgroundDownloader] Created new DownloadTask for id: ${options.id}`
-  );
-  console.log(
-    `[RNBackgroundDownloader] Registering task in tasksMap, current size: ${tasksMap.size}`
-  );
   tasksMap.set(options.id, task);
-  console.log(
-    `[RNBackgroundDownloader] Task registered. Map now contains ${
-      tasksMap.size
-    } tasks: [${Array.from(tasksMap.keys()).join(", ")}]`
-  );
-
-  if (!NativeRNBackgroundDownloader) {
-    console.error(
-      "[RNBackgroundDownloader] Native module not available for download"
-    );
-    task.onError({ error: "Native module not available" });
-    return task;
-  }
-
-  if (typeof NativeRNBackgroundDownloader.download !== "function") {
-    console.error(
-      "[RNBackgroundDownloader] download method not available on native module"
-    );
-    task.onError({ error: "Download method not available" });
-    return task;
-  }
 
   try {
-    log("[RNBackgroundDownloader] Calling native download method", {
-      id: options.id,
-    });
-    NativeRNBackgroundDownloader.download({
-      ...options,
-      metadata: JSON.stringify(options.metadata),
-      progressInterval: config.progressInterval,
-      progressMinBytes: config.progressMinBytes,
-    });
-    log("[RNBackgroundDownloader] Native download method called successfully", {
-      id: options.id,
-      taskInMap: tasksMap.has(options.id),
-    });
-  } catch (error) {
+    NativeRNBackgroundDownloader.downloadFile(
+      options.url,
+      destination,
+      options.id,
+      headers as Object,
+      JSON.stringify(metadata),
+      config.progressInterval,
+      config.progressMinBytes,
+      isAllowedOverRoaming,
+      isAllowedOverMetered,
+      isNotificationVisible,
+      options.notificationTitle || ""
+    );
+  } catch (error: any) {
     console.error("[RNBackgroundDownloader] Error in download:", error);
     task.onError({ error: error.message || "Download failed to start" });
   }
@@ -443,12 +239,11 @@ export function download(options: DownloadOptions) {
 }
 
 export const directories = {
-  documents: RNBackgroundDownloader?.documents || "/tmp/documents",
-};
-
-export const storageInfo = {
-  isMMKVAvailable: RNBackgroundDownloader?.isMMKVAvailable || false,
-  storageType: RNBackgroundDownloader?.storageType || "Unknown",
+  documents: Platform.select({
+    ios: "/tmp/documents",
+    android: "/tmp/documents",
+    default: "/tmp/documents",
+  }),
 };
 
 export default {
@@ -456,9 +251,6 @@ export default {
   checkForExistingDownloads,
   ensureDownloadsAreRunning,
   completeHandler,
-
   setConfig,
-
   directories,
-  storageInfo,
 };

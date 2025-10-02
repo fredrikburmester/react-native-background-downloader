@@ -1,37 +1,39 @@
-import { NativeModules } from "react-native";
+import NativeRNBackgroundDownloader from "./NativeRNBackgroundDownloader";
 import { TaskInfo } from "./index.d";
 
-const { RNBackgroundDownloader } = NativeModules;
-
-function validateHandler(handler) {
+function validateHandler(handler: any) {
   const type = typeof handler;
 
-  if (type !== "function")
+  if (type !== "function") {
     throw new TypeError(
       `[RNBackgroundDownloader] expected argument to be a function, got: ${type}`
     );
+  }
 }
 
 export default class DownloadTask {
   id = "";
-  state = "PENDING";
-  metadata = {};
+  state: "PENDING" | "DOWNLOADING" | "PAUSED" | "DONE" | "FAILED" | "STOPPED" =
+    "PENDING";
+  metadata: any = {};
 
   bytesDownloaded = 0;
   bytesTotal = 0;
 
-  beginHandler;
-  progressHandler;
-  doneHandler;
-  errorHandler;
+  beginHandler?: (params: any) => void;
+  progressHandler?: (params: any) => void;
+  doneHandler?: (params: any) => void;
+  errorHandler?: (params: any) => void;
 
-  constructor(taskInfo: TaskInfo, originalTask?: TaskInfo) {
+  constructor(taskInfo: TaskInfo, originalTask?: DownloadTask) {
     this.id = taskInfo.id;
     this.bytesDownloaded = taskInfo.bytesDownloaded ?? 0;
     this.bytesTotal = taskInfo.bytesTotal ?? 0;
 
     const metadata = this.tryParseJson(taskInfo.metadata);
-    if (metadata) this.metadata = metadata;
+    if (metadata) {
+      this.metadata = metadata;
+    }
 
     if (originalTask) {
       this.beginHandler = originalTask.beginHandler;
@@ -41,56 +43,44 @@ export default class DownloadTask {
     }
   }
 
-  begin(handler) {
+  begin(handler: (params: any) => void) {
     validateHandler(handler);
     this.beginHandler = handler;
     return this;
   }
 
-  progress(handler) {
+  progress(handler: (params: any) => void) {
     validateHandler(handler);
     this.progressHandler = handler;
     return this;
   }
 
-  done(handler) {
+  done(handler: (params: any) => void) {
     validateHandler(handler);
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] done() handler registered for id: ${this.id}`
-    );
     this.doneHandler = handler;
     return this;
   }
 
-  error(handler) {
+  error(handler: (params: any) => void) {
     validateHandler(handler);
     this.errorHandler = handler;
     return this;
   }
 
-  onBegin(params) {
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] onBegin called for id: ${
-        this.id
-      }, hasHandler: ${!!this.beginHandler}`
-    );
+  onBegin(params: any) {
     this.state = "DOWNLOADING";
     if (this.beginHandler) {
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] Invoking beginHandler for id: ${this.id}`
-      );
       this.beginHandler(params);
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] beginHandler invoked successfully for id: ${this.id}`
-      );
-    } else {
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] No beginHandler registered for id: ${this.id}`
-      );
     }
   }
 
-  onProgress({ bytesDownloaded, bytesTotal }) {
+  onProgress({
+    bytesDownloaded,
+    bytesTotal,
+  }: {
+    bytesDownloaded: number;
+    bytesTotal: number;
+  }) {
     this.bytesDownloaded = bytesDownloaded;
     this.bytesTotal = bytesTotal;
     if (this.progressHandler) {
@@ -98,99 +88,50 @@ export default class DownloadTask {
     }
   }
 
-  onDone(params) {
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] ===== onDone CALLED =====`
-    );
-    console.log(`[RNBackgroundDownloader] [DownloadTask] Task ID: ${this.id}`);
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] Current state: ${this.state}`
-    );
-    console.log(`[RNBackgroundDownloader] [DownloadTask] Params:`, {
-      bytesDownloaded: params.bytesDownloaded,
-      bytesTotal: params.bytesTotal,
-      location: params.location,
-      hasHeaders: !!params.headers,
-    });
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] Has doneHandler: ${!!this
-        .doneHandler}`
-    );
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] doneHandler type: ${typeof this
-        .doneHandler}`
-    );
-
+  onDone(params: any) {
     this.state = "DONE";
     this.bytesDownloaded = params.bytesDownloaded;
     this.bytesTotal = params.bytesTotal;
 
     if (this.doneHandler) {
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] ✅ INVOKING doneHandler for id: ${this.id}`
-      );
       try {
         this.doneHandler(params);
-        console.log(
-          `[RNBackgroundDownloader] [DownloadTask] ✅ doneHandler COMPLETED SUCCESSFULLY for id: ${this.id}`
-        );
       } catch (error) {
         console.error(
-          `[RNBackgroundDownloader] [DownloadTask] ❌ ERROR in doneHandler for id: ${this.id}:`,
+          `[RNBackgroundDownloader] Error in doneHandler for id: ${this.id}:`,
           error
         );
       }
-    } else {
-      console.warn(
-        `[RNBackgroundDownloader] [DownloadTask] ❌ No doneHandler registered for id: ${this.id} - callback will NOT be invoked`
-      );
     }
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] ===== onDone COMPLETE =====`
-    );
   }
 
-  onError(params) {
-    console.log(
-      `[RNBackgroundDownloader] [DownloadTask] onError called for id: ${
-        this.id
-      }, error: ${params.error}, hasHandler: ${!!this.errorHandler}`
-    );
+  onError(params: any) {
     this.state = "FAILED";
     if (this.errorHandler) {
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] Invoking errorHandler for id: ${this.id}`
-      );
       this.errorHandler(params);
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] errorHandler invoked successfully for id: ${this.id}`
-      );
-    } else {
-      console.log(
-        `[RNBackgroundDownloader] [DownloadTask] No errorHandler registered for id: ${this.id}`
-      );
     }
   }
 
   pause() {
     this.state = "PAUSED";
-    RNBackgroundDownloader.pauseTask(this.id);
+    NativeRNBackgroundDownloader.pauseDownload(this.id);
   }
 
   resume() {
     this.state = "DOWNLOADING";
-    RNBackgroundDownloader.resumeTask(this.id);
+    NativeRNBackgroundDownloader.resumeDownload(this.id);
   }
 
   stop() {
     this.state = "STOPPED";
-    RNBackgroundDownloader.stopTask(this.id);
+    NativeRNBackgroundDownloader.cancelDownload(this.id);
   }
 
-  tryParseJson(element) {
+  tryParseJson(element: any) {
     try {
-      if (typeof element === "string") element = JSON.parse(element);
-
+      if (typeof element === "string") {
+        element = JSON.parse(element);
+      }
       return element;
     } catch (e) {
       console.warn("DownloadTask tryParseJson", e);

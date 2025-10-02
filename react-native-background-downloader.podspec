@@ -14,20 +14,11 @@ Pod::Spec.new do |s|
   s.source       = { git: 'https://github.com/kesha-antonov/react-native-background-downloader.git', tag: 'main' }
 
   s.source_files = 'ios/**/*.{h,m,mm,swift}'
+  
   # React Native Core dependency
   install_modules_dependencies(s)
 
   s.dependency 'MMKV', '>= 2.1.0'
   
-  # C++ standard library settings for new architecture
-  s.pod_target_xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',
-    'CLANG_CXX_LIBRARY' => 'libc++',
-    'OTHER_CFLAGS' => '$(inherited) -std=gnu++20 -x objective-c++',
-    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=gnu++20 -DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1',
-    'HEADER_SEARCH_PATHS' => '$(inherited)'
-  }
-  
-  # Ensure C++ files are compiled properly
   s.requires_arc = true
 end

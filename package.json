@@ -50,7 +50,11 @@
   "codegenConfig": {
     "name": "RNBackgroundDownloaderSpec",
     "type": "modules",
-    "jsSrcsDir": "src"
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.eko"
+    },
+    "ios": {}
   },
   "contributors": [
     {
