@@ -120,22 +120,55 @@ console.log("[RNBackgroundDownloader] Registering downloadComplete listener");
 RNBackgroundDownloaderEmitter.addListener(
   "downloadComplete",
   ({ id, ...rest }) => {
-    log("[RNBackgroundDownloader] downloadComplete event received", {
+    console.log(
+      `[RNBackgroundDownloader] ===== downloadComplete EVENT RECEIVED =====`
+    );
+    console.log(`[RNBackgroundDownloader] Event details:`, {
       id,
+      bytesDownloaded: rest.bytesDownloaded,
+      bytesTotal: rest.bytesTotal,
+      location: rest.location,
       hasTask: tasksMap.has(id),
-      totalTasks: tasksMap.size,
+      totalTasksInMap: tasksMap.size,
+      allTaskIds: Array.from(tasksMap.keys()),
     });
+
     const task = tasksMap.get(id);
     if (task) {
+      console.log(
+        `[RNBackgroundDownloader] Task found in map, calling task.onDone() for id: ${id}`
+      );
+      console.log(
+        `[RNBackgroundDownloader] Task state before onDone: ${task.state}`
+      );
+      console.log(
+        `[RNBackgroundDownloader] Task has doneHandler: ${!!task.doneHandler}`
+      );
+
       task.onDone(rest);
+
+      console.log(
+        `[RNBackgroundDownloader] task.onDone() completed for id: ${id}`
+      );
+      console.log(
+        `[RNBackgroundDownloader] Task state after onDone: ${task.state}`
+      );
     } else {
       console.warn(
-        `[RNBackgroundDownloader] downloadComplete: No task found for id "${id}". ` +
-          `This might happen if the download completed before JS initialized or after task was removed.`
+        `[RNBackgroundDownloader] ❌ downloadComplete: No task found for id "${id}". ` +
+          `This might happen if the download completed before JS initialized or after task was removed. ` +
+          `Available task IDs: [${Array.from(tasksMap.keys()).join(", ")}]`
       );
     }
 
+    console.log(`[RNBackgroundDownloader] Removing task ${id} from tasksMap`);
     tasksMap.delete(id);
+    console.log(
+      `[RNBackgroundDownloader] Tasks remaining in map: ${tasksMap.size}`
+    );
+    console.log(
+      `[RNBackgroundDownloader] ===== downloadComplete PROCESSING COMPLETE =====`
+    );
   }
 );
 console.log("[RNBackgroundDownloader] downloadComplete listener registered");
@@ -232,9 +265,31 @@ export async function checkForExistingDownloads() {
 
     return foundTasks
       .map((taskInfo) => {
+        console.log(
+          `[RNBackgroundDownloader] Processing existing task: ${taskInfo.id}`
+        );
+
         // SECOND ARGUMENT RE-ASSIGNS EVENT HANDLERS
-        const task = new DownloadTask(taskInfo, tasksMap.get(taskInfo.id));
+        const existingTask = tasksMap.get(taskInfo.id);
+        if (existingTask) {
+          console.log(
+            `[RNBackgroundDownloader] Task ${taskInfo.id} found in map, preserving handlers`
+          );
+          console.log(
+            `[RNBackgroundDownloader] Existing task has doneHandler: ${!!existingTask.doneHandler}`
+          );
+        }
+
+        const task = new DownloadTask(taskInfo, existingTask);
         log("[RNBackgroundDownloader] checkForExistingDownloads-3", taskInfo);
+
+        // Diagnostic logging for unknown content length
+        const hasUnknownContentLength = taskInfo.bytesTotal <= 0;
+        if (hasUnknownContentLength) {
+          console.log(
+            `[RNBackgroundDownloader] Task ${taskInfo.id} has unknown content length (bytesTotal: ${taskInfo.bytesTotal}), state: ${taskInfo.state}, bytesDownloaded: ${taskInfo.bytesDownloaded}`
+          );
+        }
 
         if (taskInfo.state === RNBackgroundDownloader.TaskRunning) {
           task.state = "DOWNLOADING";
@@ -244,11 +299,30 @@ export async function checkForExistingDownloads() {
           task.stop();
           return null;
         } else if (taskInfo.state === RNBackgroundDownloader.TaskCompleted) {
-          if (taskInfo.bytesDownloaded === taskInfo.bytesTotal)
+          // Handle unknown content length: if bytesTotal is -1 or 0, consider it done if state is completed
+          if (hasUnknownContentLength) {
+            console.log(
+              `[RNBackgroundDownloader] Task ${taskInfo.id} completed with unknown content length, marking as DONE`
+            );
             task.state = "DONE";
-          // IOS completed the download but it was not done.
-          else return null;
+          } else if (taskInfo.bytesDownloaded === taskInfo.bytesTotal) {
+            task.state = "DONE";
+          } else {
+            // IOS completed the download but it was not done.
+            console.log(
+              `[RNBackgroundDownloader] Task ${taskInfo.id} marked as completed but bytes don't match (${taskInfo.bytesDownloaded}/${taskInfo.bytesTotal}), filtering out`
+            );
+            return null;
+          }
         }
+
+        console.log(
+          `[RNBackgroundDownloader] Adding task ${
+            taskInfo.id
+          } to tasksMap with state: ${
+            task.state
+          }, hasHandler: ${!!task.doneHandler}`
+        );
         tasksMap.set(taskInfo.id, task);
         return task;
       })
@@ -317,11 +391,18 @@ export function download(options: DownloadOptions) {
     metadata: options.metadata,
   });
 
-  log("[RNBackgroundDownloader] Registering task in tasksMap", {
-    id: options.id,
-    mapSize: tasksMap.size,
-  });
+  console.log(
+    `[RNBackgroundDownloader] Created new DownloadTask for id: ${options.id}`
+  );
+  console.log(
+    `[RNBackgroundDownloader] Registering task in tasksMap, current size: ${tasksMap.size}`
+  );
   tasksMap.set(options.id, task);
+  console.log(
+    `[RNBackgroundDownloader] Task registered. Map now contains ${
+      tasksMap.size
+    } tasks: [${Array.from(tasksMap.keys()).join(", ")}]`
+  );
 
   if (!NativeRNBackgroundDownloader) {
     console.error(
